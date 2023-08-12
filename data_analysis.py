@@ -7,7 +7,6 @@ Section 1: Importing important libraries
 import requests                 # For making HTTP requests and retrieving HTML content from website
 from bs4 import BeautifulSoup   # I am personally use BeautifulSoup for web scraping
 import pandas as pd
-import re                       # Regular expressions
 from textblob import TextBlob   # For NLP tasks like sentiment analysis, tokenization, parts-of-speech tagging etc.
 import syllables                # To estimate number of syllables in words.
 import nltk                     # To download punkt tokenizer
@@ -29,40 +28,39 @@ stop_words_files = ['StopWords_Auditor.txt', 'StopWords_DatesAndNumbers.txt',
                     'StopWords_Names.txt']
 
 
-stop_words = set() # Stores stopwords
+stop_words = set() # Efficient searching and no repitition
 
-for file_name in stop_words_files:
+for stop_word_file in stop_words_files:
 
     try:
 
-        with open(file_name, 'r', encoding='utf-8') as f:
-            stop_words.update(word.strip() for word in f.readlines())  # Read each line, clean each word and update the set
+        with open(stop_word_file, 'r', encoding='utf-8') as file:
+            stop_words.update(word.strip() for word in file.readlines())  # Read each line, clean each word and update the set
 
     except UnicodeDecodeError:
       
         try:
-            with open(file_name, 'r', encoding='latin-1') as f:
-                stop_words.update(word.strip() for word in f.readlines())
+            with open(stop_word_file, 'r', encoding='latin-1') as file:
+                stop_words.update(word.strip() for word in file.readlines())
 
         except UnicodeDecodeError as e:  # If both don't work, log which file is causing error.
-            print(f"Error decoding {file_name}: {e}")
+            print(f"Error decoding {stop_word_file}: {e}")
             continue
 
 # Read positive and negative words from the provided master dictionary files
 positive_words = set()
-with open('positive-words.txt', 'r', encoding='utf-8') as f:
-    positive_words.update(word.strip() for word in f.readlines())
+with open('positive-words.txt', 'r', encoding='utf-8') as file:
+    positive_words.update(word.strip() for word in file.readlines())
 
 negative_words = set()
-with open('negative-words.txt', 'r', encoding='latin-1') as f:
-    negative_words.update(word.strip() for word in f.readlines())
+with open('negative-words.txt', 'r', encoding='latin-1') as file:
+    negative_words.update(word.strip() for word in file.readlines())
 
 
 
 # Load the Excel file
 df = pd.read_excel('input.xlsx')
-list_of_urls = df['URL'].tolist()   # Extracting the 'URL' column from the DataFrame and converting it to a list named 'list_of_urls'.
-
+list_of_urls = df['URL'].tolist()   
 
 result_data = []    # will appdend all the text analysis data here
 
@@ -70,51 +68,68 @@ result_data = []    # will appdend all the text analysis data here
 Section 3: Extracting text from URLs, and text analysis
 
 
-Note: In Text analysis part, I followed the logic from text_analysis.docx given by you. 
+Note: In Text analysis part, I followed the logic from text_analysis.docx given. 
       I faced ZeroDivisionError a lot, hence had to add many if statements in between
 
       Article 11668, 17671.4 not found.
 """
 
-
-# Looping through URL ID and URL simultaneously
 for url_id, url in zip(df['URL_ID'], list_of_urls):
 
-    response = requests.get(url)                    #sending a get request to URl and returning the response object.
+    response = requests.get(url)                    
 
     soup = BeautifulSoup(response.content, 'html.parser')  # The content attribute of the response contains raw HTML content.
-    # soup variable stores the parsed HTML content
+                                                           # soup variable stores the parsed HTML content
 
 
     article_text = ""                  # will store all the paragraph text in this.
-    article = soup.find('article')   # Find article tag in the HTML document
-
+    article = soup.find('article')     # Finds the first occurance of article tag in the HTML document
+                                    
     if article:
 
-        paragraphs = article.find_all('p')   # finds all occurrences of <p> tags
-
+        paragraphs = article.find_all('p')  # returns a list of paragraph elements
         for p in paragraphs:
             article_text += p.get_text() + '\n'
     
-    if article_text:  # Checking if article text was successfully extracted
+    if article_text:  
         blob = TextBlob(article_text)
+
+        """
+        Sentiment Analysis
+        """
         
         positive_score = sum(1 for word in blob.words if word.lower() in positive_words and word.lower() not in stop_words)
-        negative_score = sum(1 for word in blob.words if word.lower() in negative_words and word.lower() not in stop_words)
-        polarity_score = (positive_score - negative_score) / ((positive_score + negative_score) + 0.000001)
-        subjectivity_score = (positive_score + negative_score) / (len(blob.words) + 0.000001)
         
+        negative_score = sum(1 for word in blob.words if word.lower() in negative_words and word.lower() not in stop_words)
+
+        polarity_score = (positive_score - negative_score) / ((positive_score + negative_score) + 0.000001)
+        # Overall sentiment of the article (Positive or Negative)
+
+        subjectivity_score = (positive_score + negative_score) / (len(blob.words) + 0.000001)
+        # Is the article subjective (emotions and opinions) or objective (facts)?
+
+       
+        """
+        Readability scores and analysis
+        """
+       
         # Checking if there are sentences before calculating averages
+        # (.) is a delimiter and differenciates sentences.
         if blob.sentences:
             avg_sentence_length = sum(len(sentence.words) for sentence in blob.sentences) / len(blob.sentences)
             avg_words_per_sentence = len(blob.words) / len(blob.sentences)
+
+          
         else:
-            avg_sentence_length = 0
+            avg_sentence_length = 0   
             avg_words_per_sentence = 0
         
-        # Checking if there are words before calculating percentages
-        if blob.words:
+        # Avoiding error probabilities
+
+        if blob.words: 
             complex_words = [word for word in blob.words if syllables.estimate(word) > 2]
+            # If for a word, syllables > 2, it is a complex word
+
             percentage_complex_words = (len(complex_words) / len(blob.words)) * 100
         else:
             percentage_complex_words = 0
@@ -122,11 +137,16 @@ for url_id, url in zip(df['URL_ID'], list_of_urls):
 
         #Calculating Variables    
         
+        # Higher fog index means complex and hard-to-read text
         fog_index = 0.4 * (avg_sentence_length + percentage_complex_words)
+        
         complex_word_count = len(complex_words)
         word_count = len(blob.words)
+
+        # It is an average
         syllable_per_word = sum(syllables.estimate(word) for word in blob.words) / len(blob.words)
-        personal_pronouns = sum(1 for word in blob.words if re.match(r'\b(?:I|me|my|mine|we|us|our|ours)\b', word, re.IGNORECASE))
+
+        personal_pronouns = sum(1 for word in blob.words if word.lower() in {'i', 'me', 'my', 'mine', 'we', 'us', 'our', 'ours'})
         avg_word_length = sum(len(word) for word in blob.words) / len(blob.words)
         
         result_data.append([url_id, url, positive_score, negative_score, polarity_score, subjectivity_score,
@@ -146,4 +166,4 @@ result_df = pd.DataFrame(result_data, columns=['URL_ID', 'URL', 'POSITIVE SCORE'
                                                 'FOG INDEX', 'AVG NUMBER OF WORDS PER SENTENCE', 'COMPLEX WORD COUNT',
                                                 'WORD COUNT', 'SYLLABLE PER WORD', 'PERSONAL PRONOUNS', 'AVG WORD LENGTH'])
 
-result_df.to_excel('final_output.xlsx', index=False)
+result_df.to_excel('test    .xlsx', index=False)
